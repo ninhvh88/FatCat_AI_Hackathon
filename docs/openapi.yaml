@@ -1,0 +1,272 @@
+openapi: 3.0.3
+info:
+  title: AI Financial Coach API
+  description: Backend API for AI Financial Coach prototype
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://your-greennode-url
+    description: GreenNode deployment
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+
+  /api/profile/demo:
+    get:
+      summary: Get demo profile (without DB)
+      responses:
+        '200':
+          description: Demo financial profile
+    post:
+      summary: Load demo persona into database
+      responses:
+        '200':
+          description: Demo persona loaded
+
+  /api/profile:
+    post:
+      summary: Create financial profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinancialProfile'
+      responses:
+        '201':
+          description: Profile created
+
+  /api/profile/{userId}:
+    get:
+      summary: Get profile by user ID
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Financial profile
+        '404':
+          description: Not found
+
+  /api/dashboard/{userId}:
+    get:
+      summary: Get dashboard data (profile + engine results + insights + action plan)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Dashboard data
+
+  /api/financial-health/{userId}:
+    get:
+      summary: Get financial health score
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Financial health score with breakdown
+
+  /api/goals:
+    post:
+      summary: Create a financial goal
+      responses:
+        '201':
+          description: Goal created
+
+  /api/goals/{userId}:
+    get:
+      summary: Get goals with projections
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Goals with projections
+
+  /api/goals/{userId}/projection:
+    get:
+      summary: Get goal projection with 3 scenarios (Conservative, Base, Optimistic)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Goal projections
+
+  /api/scenarios/predefined:
+    get:
+      summary: Get predefined scenario types
+      responses:
+        '200':
+          description: List of 7 predefined scenarios
+
+  /api/scenarios/simulate:
+    post:
+      summary: Simulate one or more scenarios
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: string
+                scenarios:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      label:
+                        type: string
+                      params:
+                        type: object
+      responses:
+        '200':
+          description: Simulation results with comparison
+
+  /api/ai/chat:
+    post:
+      summary: Chat with AI Financial Coach
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - userId
+                - message
+              properties:
+                userId:
+                  type: string
+                message:
+                  type: string
+                sessionId:
+                  type: string
+      responses:
+        '200':
+          description: AI response with tool calls and optional action plan
+
+  /api/insights/{userId}:
+    get:
+      summary: Get AI insights
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of AI insights
+
+  /api/insights/{userId}/action-plan:
+    get:
+      summary: Get personalized action plan
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Action plan with prioritized items
+
+  /api/knowledge:
+    get:
+      summary: Get knowledge base documents (RAG)
+      responses:
+        '200':
+          description: Knowledge documents
+
+components:
+  schemas:
+    FinancialProfile:
+      type: object
+      properties:
+        userId:
+          type: string
+        personal:
+          type: object
+          properties:
+            age:
+              type: number
+            maritalStatus:
+              type: string
+            dependents:
+              type: number
+        income:
+          type: object
+          properties:
+            monthlyIncome:
+              type: number
+            otherIncome:
+              type: number
+        expenses:
+          type: object
+          properties:
+            housing:
+              type: number
+            food:
+              type: number
+            transportation:
+              type: number
+            family:
+              type: number
+            entertainment:
+              type: number
+            other:
+              type: number
+        assets:
+          type: object
+          properties:
+            cash:
+              type: number
+            savings:
+              type: number
+            stocks:
+              type: number
+            realEstate:
+              type: number
+            other:
+              type: number
+        liabilities:
+          type: object
+          properties:
+            loanBalance:
+              type: number
+            interestRate:
+              type: number
+            monthlyRepayment:
+              type: number
+        goals:
+          type: array
+          items:
+            type: object

@@ -1,0 +1,185 @@
+// Prisma schema for AI Financial Coach
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Users ---
+model User {
+  id        String   @id @default(uuid())
+  email     String?  @unique
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  profiles      FinancialProfile[]
+  chatSessions  ChatSession[]
+  insights      FinancialInsight[]
+
+  @@map("users")
+}
+
+// --- Financial Profile (aggregate root) ---
+model FinancialProfile {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Personal
+  age              Int
+  maritalStatus    String   @map("marital_status")
+  dependents       Int      @default(0)
+
+  // Income
+  monthlyIncome    Decimal  @db.Decimal(18, 2) @map("monthly_income")
+  otherIncome      Decimal  @db.Decimal(18, 2) @default(0) @map("other_income")
+
+  // Expenses
+  housing          Decimal  @db.Decimal(18, 2) @default(0)
+  food             Decimal  @db.Decimal(18, 2) @default(0)
+  transportation   Decimal  @db.Decimal(18, 2) @default(0) @map("transportation")
+  family           Decimal  @db.Decimal(18, 2) @default(0)
+  entertainment    Decimal  @db.Decimal(18, 2) @default(0) @map("entertainment")
+  otherExpense     Decimal  @db.Decimal(18, 2) @default(0) @map("other_expense")
+
+  // Assets
+  cash             Decimal  @db.Decimal(18, 2) @default(0)
+  savings          Decimal  @db.Decimal(18, 2) @default(0)
+  stocks           Decimal  @db.Decimal(18, 2) @default(0)
+  realEstate       Decimal  @db.Decimal(18, 2) @default(0) @map("real_estate")
+  otherAsset       Decimal  @db.Decimal(18, 2) @default(0) @map("other_asset")
+
+  // Liabilities
+  loanBalance      Decimal  @db.Decimal(18, 2) @default(0) @map("loan_balance")
+  interestRate     Decimal  @db.Decimal(5, 2) @default(0) @map("interest_rate")
+  monthlyRepayment Decimal  @db.Decimal(18, 2) @default(0) @map("monthly_repayment")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  goals     FinancialGoal[]
+  scenarios ScenarioRecord[]
+
+  @@map("financial_profiles")
+}
+
+// --- Financial Goals ---
+model FinancialGoal {
+  id              String   @id @default(uuid())
+  profileId       String   @map("profile_id")
+  profile         FinancialProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  goalType        String   @map("goal_type")
+  goalName        String   @map("goal_name")
+  targetAmount    Decimal  @db.Decimal(18, 2) @map("target_amount")
+  targetDate      DateTime @map("target_date")
+  currentAllocated Decimal @db.Decimal(18, 2) @default(0) @map("current_allocated")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("financial_goals")
+}
+
+// --- Scenario Records ---
+model ScenarioRecord {
+  id        String   @id @default(uuid())
+  profileId String   @map("profile_id")
+  profile   FinancialProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  scenarioType  String   @map("scenario_type")
+  label         String
+  params        Json
+  result        Json
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("scenarios")
+}
+
+// --- Financial Insights ---
+model FinancialInsight {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type      String   // STRENGTH | WARNING | OPPORTUNITY
+  title     String
+  category  String
+  message   String
+  metric    Decimal?  @db.Decimal(18, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("financial_insights")
+}
+
+// --- Chat Sessions ---
+model ChatSession {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  messages  ChatMessage[]
+
+  @@map("chat_sessions")
+}
+
+// --- Chat Messages ---
+model ChatMessage {
+  id        String   @id @default(uuid())
+  sessionId String   @map("session_id")
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  role      String   // user | assistant | system
+  content   String
+  toolCalls Json?    @map("tool_calls")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("chat_messages")
+}
+
+// --- Knowledge Documents (RAG) ---
+model KnowledgeDocument {
+  id        String   @id @default(uuid())
+  title     String
+  content   String
+  source    String
+  version   String
+  effectiveDate DateTime @map("effective_date")
+  category  String
+  tags      String[] @default([])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("knowledge_documents")
+}
+
+// --- AI Interaction Logs ---
+model AiInteractionLog {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  requestId String   @map("request_id")
+  sessionId String?  @map("session_id")
+
+  intent    String?
+  toolCalls Json?    @map("tool_calls")
+  model     String?
+  latencyMs Int?     @map("latency_ms")
+  promptTokens  Int? @map("prompt_tokens")
+  completionTokens Int? @map("completion_tokens")
+  totalTokens   Int? @map("total_tokens")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("ai_interaction_logs")
+}
