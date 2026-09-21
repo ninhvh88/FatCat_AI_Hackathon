@@ -2,6 +2,7 @@ import type {
   FinancialProfile,
   ScenarioConfig,
   ScenarioResult,
+  ScenarioType,
   FinancialEngineResult,
 } from '../../types';
 import { calculateCashFlow } from './cash-flow';
@@ -143,6 +144,56 @@ export function applyScenario(profile: FinancialProfile, scenario: ScenarioConfi
       if (scenario.params.dependentsDelta) {
         modified.personal.dependents += scenario.params.dependentsDelta;
       }
+      // Stock portfolio change (e.g. market crash/recovery)
+      if (scenario.params.stockChangePercent) {
+        modified.assets.stocks *= (1 + scenario.params.stockChangePercent / 100);
+      }
+      // Real estate change
+      if (scenario.params.realEstateChangePercent) {
+        modified.assets.realEstate *= (1 + scenario.params.realEstateChangePercent / 100);
+      }
+      // Additional debt
+      if (scenario.params.additionalDebt) {
+        modified.liabilities.loanBalance += scenario.params.additionalDebt;
+      }
+      break;
+    }
+
+    case 'NEW_DEBT': {
+      const amount = scenario.params.amount || 500_000_000;
+      const rate = (scenario.params.interestRate || 10) / 100 / 12;
+      const termMonths = scenario.params.loanTermMonths || 60;
+      modified.liabilities.loanBalance += amount;
+      modified.liabilities.interestRate = scenario.params.interestRate || 10;
+      if (rate > 0) {
+        const repayment = (amount * rate * Math.pow(1 + rate, termMonths)) / (Math.pow(1 + rate, termMonths) - 1);
+        modified.liabilities.monthlyRepayment += repayment;
+      }
+      break;
+    }
+
+    case 'EXPENSE_DECREASE': {
+      const amount = scenario.params.amount || 2_000_000;
+      modified.expenses.other -= amount;
+      if (modified.expenses.other < 0) modified.expenses.other = 0;
+      break;
+    }
+
+    case 'JOB_CHANGE': {
+      const percent = scenario.params.percent || 20;
+      modified.income.monthlyIncome *= (1 + percent / 100);
+      break;
+    }
+
+    case 'GET_MARRIED': {
+      if (modified.personal.maritalStatus === 'SINGLE') {
+        modified.personal.maritalStatus = 'MARRIED';
+      }
+      break;
+    }
+
+    case 'CHANGE_SAVINGS_RATE': {
+      // No direct profile change — savings rate is derived from cash flow
       break;
     }
   }
@@ -224,6 +275,68 @@ export function getPredefinedScenarios(): ScenarioConfig[] {
       type: 'LOAN_INTEREST_INCREASE',
       label: 'Lãi suất vay +3%',
       params: { percent: 3 },
+    },
+  ];
+}
+
+// Expanded predefined scenarios grouped by category
+export interface ScenarioGroup {
+  category: string;
+  icon: string;
+  scenarios: { type: ScenarioType; label: string; params: Record<string, number> }[];
+}
+
+export function getGroupedScenarios(): ScenarioGroup[] {
+  return [
+    {
+      category: 'Thu nhập',
+      icon: '💰',
+      scenarios: [
+        { type: 'INCOME_INCREASE', label: 'Thu nhập tăng 20%', params: { percent: 20 } },
+        { type: 'INCOME_DECREASE', label: 'Thu nhập giảm 10%', params: { percent: 10 } },
+        { type: 'INCOME_DECREASE', label: 'Thu nhập giảm 20%', params: { percent: 20 } },
+        { type: 'INCOME_DECREASE', label: 'Mất nguồn thu nhập chính', params: { percent: 100 } },
+      ],
+    },
+    {
+      category: 'Chi phí',
+      icon: '🏠',
+      scenarios: [
+        { type: 'EXPENSE_INCREASE', label: 'Chi tiêu tăng 20%', params: { amount: 5000000 } },
+        { type: 'EXPENSE_INCREASE', label: 'Chi phí sinh hoạt tăng mạnh', params: { amount: 10000000 } },
+        { type: 'EXPENSE_INCREASE', label: 'Chi phí y tế bất thường', params: { amount: 50000000 } },
+        { type: 'EXPENSE_INCREASE', label: 'Chi phí nuôi con tăng', params: { amount: 5000000 } },
+      ],
+    },
+    {
+      category: 'Lãi suất / Nợ',
+      icon: '🏦',
+      scenarios: [
+        { type: 'LOAN_INTEREST_INCREASE', label: 'Lãi suất tăng 1%', params: { percent: 1 } },
+        { type: 'LOAN_INTEREST_INCREASE', label: 'Lãi suất tăng 2%', params: { percent: 2 } },
+        { type: 'LOAN_INTEREST_INCREASE', label: 'Lãi suất tăng 3%', params: { percent: 3 } },
+        { type: 'NEW_DEBT', label: 'Phát sinh khoản vay mới', params: { amount: 500000000, interestRate: 10, loanTermMonths: 60 } },
+      ],
+    },
+    {
+      category: 'Đầu tư',
+      icon: '📊',
+      scenarios: [
+        { type: 'CUSTOM', label: 'Cổ phiếu giảm 10%', params: { stockChangePercent: -10 } },
+        { type: 'CUSTOM', label: 'Cổ phiếu giảm 20%', params: { stockChangePercent: -20 } },
+        { type: 'CUSTOM', label: 'Cổ phiếu giảm 30%', params: { stockChangePercent: -30 } },
+        { type: 'CUSTOM', label: 'Thị trường phục hồi 20%', params: { stockChangePercent: 20 } },
+      ],
+    },
+    {
+      category: 'Mục tiêu cuộc sống',
+      icon: '🎯',
+      scenarios: [
+        { type: 'NEW_CHILD', label: 'Sinh con', params: { monthlyCost: 5000000 } },
+        { type: 'BUY_HOUSE', label: 'Mua nhà', params: { price: 3000000000, downPayment: 900000000, interestRate: 8, loanTermMonths: 360 } },
+        { type: 'BUY_CAR', label: 'Mua ô tô', params: { price: 600000000, downPayment: 180000000, interestRate: 8, loanTermMonths: 60 } },
+        { type: 'CUSTOM', label: 'Nghỉ hưu sớm', params: { incomeDelta: -20000000 } },
+      ],
     },
   ];
 }

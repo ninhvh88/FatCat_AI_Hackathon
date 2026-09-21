@@ -5,6 +5,7 @@ import { calculateFinancialEngine } from '../services/financial-engine';
 import { generateInsights } from '../services/insight.service';
 import { generateActionPlan } from '../services/action-plan.service';
 import { dbToProfile } from './profile.routes';
+import { getProfileFromStore, isDemoUserId } from '../services/profile-store';
 import type { FinancialProfile, DashboardData } from '../types';
 
 // GET /api/dashboard/:userId
@@ -47,11 +48,17 @@ export async function getProfile(userId: string): Promise<FinancialProfile | nul
       return dbToProfile(dbProfile);
     }
   } catch {
-    // DB not available, fall through to demo
+    // DB not available, fall through to in-memory store
+  }
+
+  // Try in-memory store (covers custom profiles created without DB)
+  const memProfile = getProfileFromStore(userId);
+  if (memProfile) {
+    return memProfile;
   }
 
   // Fall back to demo profile
-  if (userId === DEMO_USER_ID || userId === 'demo') {
+  if (isDemoUserId(userId)) {
     return createDemoProfile(DEMO_USER_ID);
   }
 
