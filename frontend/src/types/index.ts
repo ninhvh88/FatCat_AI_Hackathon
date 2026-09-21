@@ -182,6 +182,13 @@ export interface ChatResponse {
   actionPlan?: ActionPlan;
 }
 
+export type ChatStreamEvent =
+  | { type: 'thinking'; message: string }
+  | { type: 'tools'; toolCalls: any[] }
+  | { type: 'delta'; content: string }
+  | { type: 'done'; message: string; toolCalls: any[]; sessionId: string; actionPlan?: ActionPlan }
+  | { type: 'error'; message: string };
+
 export interface ScenarioConfig {
   type: string;
   label: string;

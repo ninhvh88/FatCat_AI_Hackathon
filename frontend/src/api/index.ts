@@ -48,7 +48,89 @@ export const lifeEventsApi = {
     API.post('/life-events/loan-burden', data).then((r) => r.data),
 };
 
-// AI Chat
+// AI Coach — uses main /api/ai/chat endpoint (backed by GreenNode Agent when LLM_PROVIDER=greennode)
+export const aiCoachApi = {
+  chat: (data: { userId: string; message: string; sessionId?: string }) =>
+    API.post('/ai/chat', data, { timeout: 90000 }).then((r) => r.data),
+
+  /** Streaming chat via Server-Sent Events — yields events as the AI generates */
+  chatStream: async function* (
+    data: { userId: string; message: string; sessionId?: string }
+  ): AsyncGenerator<import('../types').ChatStreamEvent, void, void> {
+    const response = await fetch('/api/ai/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => 'Unknown error');
+      throw new Error(`HTTP ${response.status}: ${errText}`);
+    }
+
+    if (!response.body) {
+      throw new Error('No response body for streaming');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE events are separated by double newlines
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || ''; // Keep incomplete event in buffer
+
+      for (const eventStr of events) {
+        if (!eventStr.trim()) continue;
+
+        let eventType = '';
+        let eventData = '';
+        for (const line of eventStr.split('\n')) {
+          if (line.startsWith('event: ')) eventType = line.slice(7).trim();
+          if (line.startsWith('data: ')) eventData = line.slice(6);
+        }
+
+        if (eventType && eventData) {
+          try {
+            const parsed = JSON.parse(eventData);
+            yield { type: eventType, ...parsed } as any;
+          } catch {
+            // Skip malformed event
+          }
+        }
+      }
+    }
+
+    // Process any remaining buffer
+    if (buffer.trim()) {
+      let eventType = '';
+      let eventData = '';
+      for (const line of buffer.split('\n')) {
+        if (line.startsWith('event: ')) eventType = line.slice(7).trim();
+        if (line.startsWith('data: ')) eventData = line.slice(6);
+      }
+      if (eventType && eventData) {
+        try {
+          const parsed = JSON.parse(eventData);
+          yield { type: eventType, ...parsed } as any;
+        } catch {
+          // Skip
+        }
+      }
+    }
+  },
+
+  getStatus: () => API.get('/ai-coach/status').then((r) => r.data),
+  getSessions: (userId: string) => API.get(`/ai/sessions/${userId}`).then((r) => r.data),
+};
+
+// AI Chat — alias for backward compatibility
 export const aiApi = {
   chat: (data: { userId: string; message: string; sessionId?: string }) =>
     API.post('/ai/chat', data).then((r) => r.data),

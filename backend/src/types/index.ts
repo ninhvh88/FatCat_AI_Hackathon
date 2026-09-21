@@ -373,7 +373,31 @@ export interface LLMProvider {
       model?: string;
     }
   ): Promise<LLMResponse>;
+  /** Optional streaming chat — yields content chunks as the LLM generates */
+  chatStream?(
+    messages: LLMMessage[],
+    options?: {
+      tools?: LLMToolDefinition[];
+      temperature?: number;
+      model?: string;
+    }
+  ): AsyncGenerator<LLMStreamChunk, void, void>;
 }
+
+export interface LLMStreamChunk {
+  /** Delta content text (empty string on final chunk) */
+  content: string;
+  /** True when stream is complete */
+  done: boolean;
+}
+
+// --- Streaming Chat Events ---
+export type ChatStreamEvent =
+  | { type: 'thinking'; message: string }
+  | { type: 'tools'; toolCalls: ToolCallRecord[] }
+  | { type: 'delta'; content: string }
+  | { type: 'done'; message: string; toolCalls: ToolCallRecord[]; sessionId: string; actionPlan?: ActionPlan }
+  | { type: 'error'; message: string };
 
 // --- Knowledge / RAG ---
 export interface KnowledgeDocument {

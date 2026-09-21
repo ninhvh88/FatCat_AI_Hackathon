@@ -5,8 +5,10 @@ import type {
   ToolCallRecord,
   LLMMessage,
   ActionPlan,
+  ChatStreamEvent,
 } from '../../types';
 import { createLLMProvider } from './providers/llm-providers';
+import { GreenNodeLLMProvider } from './providers/greennode-provider';
 import { createFinancialTools, toolDefinitions } from './tools/financial-tools';
 import { calculateFinancialEngine } from '../financial-engine';
 import { generateInsights } from '../insight.service';
@@ -30,6 +32,96 @@ export async function processChat(
   const startTime = Date.now();
   const sanitizedMessage = sanitizeUserInput(message);
 
+  // Create LLM provider
+  const provider = createLLMProvider();
+
+  // ============================================================
+  // GreenNode Agent Provider — delegate entirely to the AI agent
+  // The agent has: Financial Engine, tool calling, intent routing,
+  // guardrails, RAG, action plan. We just pass through the request
+  // and apply guardrails locally (defense in depth).
+  // ============================================================
+  if (provider.name === 'greennode') {
+    const greennodeProvider = provider as GreenNodeLLMProvider;
+
+    // Build messages for the provider (it extracts the user message)
+    const engine = calculateFinancialEngine(profile);
+    const profileSummary = buildProfileSummary(profile, engine);
+    const systemPrompt = buildSystemPrompt(profileSummary);
+    const llmMessages: LLMMessage[] = [
+      { role: 'system', content: systemPrompt },
+      ...history.slice(-10).map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      })),
+      { role: 'user', content: sanitizedMessage },
+    ];
+
+    try {
+      // Call the GreenNode agent
+      await provider.chat(llmMessages);
+
+      // Get the full agent response (with tool calls + action plan)
+      const agentResponse = greennodeProvider.getLastAgentResponse();
+
+      if (agentResponse) {
+        const latencyMs = Date.now() - startTime;
+        console.log(JSON.stringify({
+          event: 'ai.chat.complete',
+          latencyMs,
+          toolCalls: agentResponse.toolCalls?.length ?? 0,
+          provider: 'greennode',
+          intent: 'DELEGATED',
+          agent: 'greennode',
+          toolsExecuted: (agentResponse.toolCalls ?? []).map((t) => t.toolName),
+        }));
+
+        return {
+          message: enforceGuardrails(agentResponse.message),
+          toolCalls: agentResponse.toolCalls ?? [],
+          sessionId: agentResponse.sessionId ?? `session-${Date.now()}`,
+          actionPlan: agentResponse.actionPlan,
+        };
+      }
+
+      // Fallback if agent response is null (shouldn't happen)
+      return {
+        message: 'Xin lỗi, AI Agent không phản hồi. Vui lòng thử lại.',
+        toolCalls: [],
+        sessionId: `session-${Date.now()}`,
+      };
+    } catch (err) {
+      const latencyMs = Date.now() - startTime;
+      console.log(JSON.stringify({
+        event: 'ai.chat.failed',
+        latencyMs,
+        provider: 'greennode',
+        error: (err as Error).message,
+      }));
+
+      const errorMsg = (err as Error).message;
+      let userMessage: string;
+      if (errorMsg.includes('timeout') || errorMsg.includes('abort')) {
+        userMessage = 'AI Agent đang phản hồi chậm. Vui lòng thử lại sau.';
+      } else if (errorMsg.includes('fetch') || errorMsg.includes('connect')) {
+        userMessage = 'Không thể kết nối tới AI Agent. Vui lòng kiểm tra kết nối và thử lại.';
+      } else {
+        userMessage = 'AI Agent gặp lỗi. Vui lòng thử lại.';
+      }
+
+      return {
+        message: userMessage,
+        toolCalls: [],
+        sessionId: `session-${Date.now()}`,
+      };
+    }
+  }
+
+  // ============================================================
+  // Local providers (mock / openai / compatible)
+  // Original orchestrator flow with local Financial Engine
+  // ============================================================
+
   // Phase 0: Intent classification (Supervisor)
   const intentResult = classifyIntent(sanitizedMessage);
   const agentType = intentToAgent(intentResult.intent);
@@ -43,9 +135,6 @@ export async function processChat(
     keywords: intentResult.keywords,
     toolsSelected: relevantTools,
   }));
-
-  // Create LLM provider
-  const provider = createLLMProvider();
 
   // Create financial tools context
   const toolContext = { profile };
@@ -156,6 +245,205 @@ export async function processChat(
   }));
 
   return {
+    message: responseContent,
+    toolCalls: toolCallRecords,
+    sessionId: `session-${Date.now()}`,
+    actionPlan,
+  };
+}
+
+// ============================================================
+// Streaming Chat — yields events as the response is generated
+// Phase 0-2: non-streaming (intent + tool selection + execution)
+// Phase 3: streaming LLM response (word-by-word)
+// Phase 4-6: guardrails + RAG + action plan (applied to final text)
+// ============================================================
+export async function* processChatStream(
+  profile: FinancialProfile,
+  message: string,
+  history: ChatMessage[] = []
+): AsyncGenerator<ChatStreamEvent, void, void> {
+  const startTime = Date.now();
+  const sanitizedMessage = sanitizeUserInput(message);
+  const provider = createLLMProvider();
+
+  // --- GreenNode provider: delegate to non-streaming, yield as events ---
+  if (provider.name === 'greennode') {
+    try {
+      yield { type: 'thinking', message: 'AI đang phân tích tình hình tài chính...' };
+      const result = await processChat(profile, message, history);
+      // Yield tool calls first
+      if (result.toolCalls.length > 0) {
+        yield { type: 'tools', toolCalls: result.toolCalls };
+      }
+      // Yield content as a single delta (no streaming from GreenNode agent)
+      yield { type: 'delta', content: result.message };
+      // Yield done
+      yield {
+        type: 'done',
+        message: result.message,
+        toolCalls: result.toolCalls,
+        sessionId: result.sessionId,
+        actionPlan: result.actionPlan,
+      };
+    } catch (err) {
+      yield { type: 'error', message: 'AI Agent gặp lỗi. Vui lòng thử lại.' };
+    }
+    return;
+  }
+
+  // --- Local providers (mock / openai / compatible) ---
+
+  // Phase 0: Intent classification
+  yield { type: 'thinking', message: 'AI đang phân tích câu hỏi...' };
+
+  const intentResult = classifyIntent(sanitizedMessage);
+  const agentType = intentToAgent(intentResult.intent);
+  const relevantTools = getToolsForAgent(agentType);
+
+  const toolContext = { profile };
+  const tools = createFinancialTools(toolContext);
+  const engine = calculateFinancialEngine(profile);
+  const profileSummary = buildProfileSummary(profile, engine);
+  const systemPrompt = buildSystemPrompt(profileSummary);
+  const llmMessages: LLMMessage[] = [
+    { role: 'system', content: systemPrompt },
+    ...history.slice(-10).map((m) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    })),
+    { role: 'user', content: sanitizedMessage },
+  ];
+
+  // Phase 1: LLM tool selection (non-streaming)
+  const filteredToolDefs = toolDefinitions.filter((td) =>
+    relevantTools.includes(td.function.name) ||
+    td.function.name === 'getFinancialProfile' ||
+    td.function.name === 'getFinancialInsights'
+  );
+
+  let llmResponse;
+  try {
+    llmResponse = await provider.chat(llmMessages, {
+      tools: filteredToolDefs,
+      temperature: 0.7,
+    });
+  } catch (err) {
+    yield { type: 'error', message: 'Không thể kết nối tới AI. Vui lòng thử lại.' };
+    return;
+  }
+
+  // Phase 2: Execute tool calls
+  const toolCallRecords: ToolCallRecord[] = [];
+  if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
+    for (const tc of llmResponse.toolCalls) {
+      const tool = tools.get(tc.name);
+      if (tool) {
+        const toolStart = Date.now();
+        try {
+          const result = await tool.execute(tc.args, toolContext);
+          toolCallRecords.push({
+            toolName: tc.name,
+            args: tc.args,
+            result,
+            latencyMs: Date.now() - toolStart,
+          });
+        } catch (err) {
+          toolCallRecords.push({
+            toolName: tc.name,
+            args: tc.args,
+            result: { error: (err as Error).message },
+            latencyMs: Date.now() - toolStart,
+          });
+        }
+      }
+    }
+  }
+
+  // Yield tool calls to frontend
+  if (toolCallRecords.length > 0) {
+    yield { type: 'tools', toolCalls: toolCallRecords };
+  }
+
+  // Phase 3: Generate response (streaming for real LLM, single chunk for mock)
+  let responseContent: string;
+
+  if (provider.name === 'mock') {
+    // Mock: generate complete response, yield as single delta
+    responseContent = generateResponseFromTools(sanitizedMessage, toolCallRecords, profile, engine);
+    yield { type: 'delta', content: responseContent };
+  } else if (provider.chatStream && toolCallRecords.length > 0) {
+    // Real LLM with streaming: send tool results back and stream response
+    const toolResultsMessage: LLMMessage = {
+      role: 'user',
+      content: `Kết quả từ financial tools:\n${JSON.stringify(toolCallRecords.map((t) => ({ tool: t.toolName, result: t.result })), null, 2)}\n\nHãy giải thích kết quả này cho người dùng bằng tiếng Việt, sử dụng số liệu thực từ tools.`,
+    };
+
+    responseContent = '';
+    try {
+      for await (const chunk of provider.chatStream(
+        [...llmMessages, toolResultsMessage],
+        { temperature: 0.7 }
+      )) {
+        if (chunk.content) {
+          responseContent += chunk.content;
+          yield { type: 'delta', content: chunk.content };
+        }
+      }
+    } catch (err) {
+      // If streaming fails mid-way, yield what we have and add error note
+      if (responseContent) {
+        // Partial response — continue with what we have
+      } else {
+        yield { type: 'error', message: 'AI gặp lỗi khi tạo phản hồi. Vui lòng thử lại.' };
+        return;
+      }
+    }
+  } else if (toolCallRecords.length > 0) {
+    // Real LLM without streaming support — fallback to non-streaming
+    const toolResultsMessage: LLMMessage = {
+      role: 'user',
+      content: `Kết quả từ financial tools:\n${JSON.stringify(toolCallRecords.map((t) => ({ tool: t.toolName, result: t.result })), null, 2)}\n\nHãy giải thích kết quả này cho người dùng bằng tiếng Việt, sử dụng số liệu thực từ tools.`,
+    };
+    const finalResponse = await provider.chat(
+      [...llmMessages, toolResultsMessage],
+      { temperature: 0.7 }
+    );
+    responseContent = finalResponse.content;
+    yield { type: 'delta', content: responseContent };
+  } else {
+    // No tools called — use LLM's direct response
+    responseContent = llmResponse.content;
+    yield { type: 'delta', content: responseContent };
+  }
+
+  // Phase 4: Guardrails
+  responseContent = enforceGuardrails(responseContent);
+
+  // Phase 5: RAG
+  const knowledgeResults = searchKnowledge(sanitizedMessage);
+  if (knowledgeResults.length > 0 && isEducationalQuestion(sanitizedMessage)) {
+    responseContent += `\n\n📖 **Kiến thức tài chính:** ${knowledgeResults[0].snippet}`;
+  }
+
+  // Phase 6: Action plan
+  let actionPlan: ActionPlan | undefined;
+  if (isActionPlanRequest(sanitizedMessage) || isActionPlanRequest(responseContent)) {
+    actionPlan = generateActionPlan(profile, engine);
+  }
+
+  const latencyMs = Date.now() - startTime;
+  console.log(JSON.stringify({
+    event: 'ai.chat.stream.complete',
+    latencyMs,
+    toolCalls: toolCallRecords.length,
+    provider: provider.name,
+    contentLength: responseContent.length,
+  }));
+
+  // Yield final done event
+  yield {
+    type: 'done',
     message: responseContent,
     toolCalls: toolCallRecords,
     sessionId: `session-${Date.now()}`,

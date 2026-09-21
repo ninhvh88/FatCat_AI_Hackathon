@@ -15,6 +15,7 @@ import financialHealthRoutes from './routes/financial-health.routes';
 import goalsRoutes from './routes/goals.routes';
 import scenariosRoutes from './routes/scenarios.routes';
 import aiRoutes from './routes/ai.routes';
+import aiCoachRoutes from './routes/ai-coach.routes';
 import insightsRoutes from './routes/insights.routes';
 import lifeEventsRoutes from './routes/life-events.routes';
 import { getAllKnowledge } from './services/rag/knowledge-service';
@@ -41,6 +42,7 @@ app.get('/health', (_req, res) => {
     status: 'ok',
     env: config.app.env,
     llmProvider: config.llm.provider,
+    aiAgentConfigured: !!config.greennode.agentUrl,
     timestamp: new Date().toISOString(),
   });
 });
@@ -52,6 +54,7 @@ app.use('/api/financial-health', financialHealthRoutes);
 app.use('/api/goals', goalsRoutes);
 app.use('/api/scenarios', scenariosRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/ai-coach', aiCoachRoutes);
 app.use('/api/insights', insightsRoutes);
 app.use('/api/life-events', lifeEventsRoutes);
 

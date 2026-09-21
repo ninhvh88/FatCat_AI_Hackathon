@@ -23,11 +23,17 @@ export const config = {
     url: required('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/financial_coach'),
   },
   llm: {
-    provider: optional('LLM_PROVIDER', 'mock'), // mock | openai | compatible
+    provider: optional('LLM_PROVIDER', 'mock'), // mock | openai | compatible | greennode
     apiKey: optional('LLM_API_KEY', ''),
     model: optional('LLM_MODEL', 'gpt-4o-mini'),
     baseUrl: optional('LLM_BASE_URL', 'https://api.openai.com/v1'),
     temperature: parseFloat(optional('LLM_TEMPERATURE', '0.7')),
+  },
+  // GreenNode AgentBase — AI Agent endpoint for AI Coach
+  greennode: {
+    agentUrl: optional('GREENNODE_AI_AGENT_URL', ''),
+    agentApiKey: optional('GREENNODE_AI_AGENT_API_KEY', ''),
+    agentTimeoutMs: parseInt(optional('GREENNODE_AI_AGENT_TIMEOUT_MS', '30000'), 10),
   },
   jwt: {
     secret: optional('JWT_SECRET', 'dev-secret-change-in-production'),

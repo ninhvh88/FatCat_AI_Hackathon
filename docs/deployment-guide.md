@@ -61,11 +61,14 @@ port 8080 — no external database required (demo mode uses in-memory data).
 
 | Property | Value |
 |----------|-------|
-| **Endpoint URL** | https://endpoint-21fe7e42-0151-46bf-86a7-00e70ebe890a.agentbase-runtime.aiplatform.vngcloud.vn |
-| **Runtime ID** | `runtime-c9c626ab-1709-45b6-9fcd-bda3e66a0c39` |
+| **Endpoint URL** | https://endpoint-7b76d310-ed76-46cc-b271-fc5e81fb6f2b.agentbase-runtime.aiplatform.vngcloud.vn |
+| **Runtime ID** | `runtime-e1f81b1b-797e-4ade-bf39-cdf1e922f130` |
 | **Runtime Name** | `fatcat-financial-coach` |
 | **Flavor** | `runtime-s2-general-2x4` (2 vCPU, 4 GB RAM) |
 | **Image** | `vcr.vngcloud.vn/111480-abp114545/ai-financial-coach:latest` |
+| **LLM Provider** | `compatible` (real LLM via VNGCloud MaaS) |
+| **LLM Model** | `z-ai/glm-5.2-hackathon` (GLM-5.2) |
+| **LLM Endpoint** | `https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1` |
 | **Status** | ACTIVE |
 | **Console** | https://aiplatform.console.vngcloud.vn/agent-runtime?tab=runtime |
 
@@ -169,18 +172,25 @@ curl -X POST https://<endpoint-url>/api/ai/chat \
 # → 2 tool calls (getFinancialProfile, getFinancialInsights) + AI response
 ```
 
-### Using GreenNode LLM (Optional)
+### Using GreenNode LLM (Production — Currently Active)
 
-To use GreenNode's OpenAI-compatible LLM instead of mock:
+The deployed runtime uses VNGCloud MaaS (Model as a Service) with a real LLM:
 
 ```json
 "environmentVariables": {
   "LLM_PROVIDER": "compatible",
-  "LLM_API_KEY": "<greennode-llm-key>",
+  "LLM_API_KEY": "<vngcloud-maas-api-key>",
   "LLM_BASE_URL": "https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1",
-  "LLM_MODEL": "<model-name>"
+  "LLM_MODEL": "z-ai/glm-5.2-hackathon"
 }
 ```
+
+Available models on VNGCloud MaaS:
+- `z-ai/glm-5.2-hackathon` (GLM-5.2 — currently used)
+- `qwen/qwen3.6-flash` (Qwen 3.6 Flash)
+- `google/gemma-4-31b-it` (Gemma 4 31B)
+
+The LLM generates natural language responses; the Financial Engine performs all deterministic calculations.
 
 ### Runtime Management
 

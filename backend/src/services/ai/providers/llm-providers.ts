@@ -1,5 +1,6 @@
-import type { LLMProvider, LLMMessage, LLMResponse, LLMToolDefinition } from '../../../types';
+import type { LLMProvider, LLMMessage, LLMResponse, LLMToolDefinition, LLMStreamChunk } from '../../../types';
 import { config } from '../../../config/env';
+import { GreenNodeLLMProvider } from './greennode-provider';
 
 // ============================================================
 // Mock LLM Provider
@@ -204,6 +205,36 @@ export class OpenAIProvider implements LLMProvider {
         : undefined,
     };
   }
+
+  async *chatStream(
+    messages: LLMMessage[],
+    options?: { tools?: LLMToolDefinition[]; temperature?: number; model?: string }
+  ): AsyncGenerator<LLMStreamChunk, void, void> {
+    const model = options?.model ?? config.llm.model;
+    const temperature = options?.temperature ?? config.llm.temperature;
+
+    const requestParams: any = {
+      model,
+      messages,
+      temperature,
+      stream: true,
+    };
+
+    // Note: tools are not passed during streaming phase (Phase 3).
+    // Tool selection happens in Phase 1 (non-streaming). Streaming is
+    // only for the final response generation with tool results.
+
+    const stream = await this.client.chat.completions.create(requestParams);
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content;
+      if (delta) {
+        yield { content: delta, done: false };
+      }
+    }
+
+    yield { content: '', done: true };
+  }
 }
 
 // ============================================================
@@ -231,6 +262,16 @@ export class CompatibleLLMProvider implements LLMProvider {
     provider.name = 'compatible';
     return provider.chat(messages, options);
   }
+
+  async *chatStream(
+    messages: LLMMessage[],
+    options?: { tools?: LLMToolDefinition[]; temperature?: number; model?: string }
+  ): AsyncGenerator<LLMStreamChunk, void, void> {
+    // Delegate to OpenAIProvider's streaming implementation
+    const provider = new OpenAIProvider();
+    provider.name = 'compatible';
+    yield* provider.chatStream(messages, options);
+  }
 }
 
 // ============================================================
@@ -240,6 +281,13 @@ export function createLLMProvider(): LLMProvider {
   const provider = config.llm.provider.toLowerCase();
 
   switch (provider) {
+    case 'greennode':
+      if (!config.greennode.agentUrl) {
+        console.warn('[LLM] No GREENNODE_AI_AGENT_URL configured, falling back to mock');
+        return new MockLLMProvider();
+      }
+      return new GreenNodeLLMProvider();
+
     case 'openai':
       if (!config.llm.apiKey) {
         console.warn('[LLM] No API key for OpenAI provider, falling back to mock');
